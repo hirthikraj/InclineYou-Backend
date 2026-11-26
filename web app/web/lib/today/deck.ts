@@ -1310,7 +1310,12 @@ function parseDay(value?: string): number | null {
 }
 
 /**
- * "Full Body B · Week 4/8".
+ * "Full Body B · Week 4 of 8".
+ *
+ * Spelled out since the Today revamp (26 Nov 2026): the reference says *Week 6
+ * of 12*, and a fraction beside a pack's *6/12 sessions* elsewhere on the page
+ * read as the same kind of number. It is a position in a plan, so it is said
+ * as one.
  *
  * The week counter is what turns a session into a position in a plan, and it is
  * the single most-repeated element in the design set's session rows. It only
@@ -1325,7 +1330,7 @@ function sessionDetail(
   const label = session.dayLabel?.trim() || program?.name?.trim() || 'Session';
   if (!program) return label;
   // v1: the workout knows its own plan week, which beats counting from dates.
-  if (session.week && program.weeks) return `${label} · Week ${Math.min(session.week, program.weeks)}/${program.weeks}`;
+  if (session.week && program.weeks) return `${label} · Week ${Math.min(session.week, program.weeks)} of ${program.weeks}`;
 
   const start = parseDay(program.startDate);
   const end = parseDay(program.endDate);
@@ -1336,7 +1341,7 @@ function sessionDetail(
   if (end === null) return `${label} · Week ${week}`;
 
   const total = Math.max(1, Math.ceil((startOfDay(end) - startOfDay(start)) / (7 * DAY_MS)));
-  return `${label} · Week ${Math.min(week, total)}/${total}`;
+  return `${label} · Week ${Math.min(week, total)} of ${total}`;
 }
 
 /** The default a session with no `durationMinutes` gets. One slot. */

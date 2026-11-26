@@ -7,7 +7,10 @@ import type { Deck, DeckActivity, DeckMoney, DeckSession, DeckWeek } from '@/lib
 import { MODE_LABELS, type DeliveryMode } from '@/lib/today/mode';
 import { sessions as sessionCount } from '@/lib/today/copy';
 import { rupees, rupeesShort } from '@/lib/today/time';
-import { Chevron } from '@/components/shell/Icons';
+import { Check, Chevron } from '@/components/shell/Icons';
+import { Button } from '@/web-components/ui/Button';
+import { MarkAnswer } from './MarkAnswer';
+import { useMarkRows } from './useMarkRows';
 import { Card } from '@/web-components/ui/Card';
 import { Tag } from '@/web-components/ui/Tag';
 import { freeTag } from '@/lib/schedule/billing';
@@ -156,7 +159,7 @@ function SectionHead({
  */
 export function Glance({ deck }: { deck: Deck }) {
   return (
-    <Slab title="Today at a glance">
+    <Slab title="Today at a glance" flush>
       {/*
         THREE NUMBERS, NOT THREE CARDS.
 
@@ -340,19 +343,38 @@ const serverFilters = (): Filters => DEFAULT_FILTERS;
  * Filtering to nothing is allowed and says so. The app's rule, and the alternative
  * is refusing the last tap, which reads as a broken chip.
  */
-export function TodayList({ deck, heroIds }: { deck: Deck; heroIds: string[] }) {
+export function TodayList({
+  deck,
+  heroIds,
+  now,
+  dayOver,
+}: {
+  deck: Deck;
+  heroIds: string[];
+  /** The ticking instant — a session becomes answerable the minute it starts. */
+  now: number;
+  /**
+   * Nothing is left to start (no running log, nothing up next). The card then
+   * becomes *Log today's sessions*: every row is in the past, the hero has
+   * rolled forward to tomorrow, and so no row is dropped for a hero card.
+   */
+  dayOver: boolean;
+}) {
   const filters = useSyncExternalStore(subscribeFilters, readFilters, serverFilters);
   const toggle = (key: keyof Filters) => writeFilters({ ...filters, [key]: !filters[key] });
+  const { stateOf, answer, markAll, holding } = useMarkRows();
 
+  /* During the day the hero draws the next session in full, so its row is
+     dropped here; once the day is over the hero is tomorrow's and every one of
+     today's sessions belongs in this list. */
   const rest = useMemo(
-    () => deck.today.filter((s) => s.id !== heroIds[0]),
-    [deck.today, heroIds],
+    () => (dayOver ? deck.today : deck.today.filter((s) => s.id !== heroIds[0])),
+    [deck.today, heroIds, dayOver],
   );
 
-  /* The counts are about the DAY, as the note above says they are — including
-     the session the hero is drawing. Counted over `rest` they read *In Person 0*
-     on a day with a 6:15 PM floor session still to come, which is a chip saying
-     the day is over when it is not. */
+  /* The counts are about the DAY — including the session the hero is drawing.
+     Counted over `rest` they read *In Person 0* on a day with a 6:15 PM floor
+     session still to come. */
   const counts = useMemo(() => {
     const live = deck.today.filter((s) => !s.done);
     return {
@@ -362,38 +384,80 @@ export function TodayList({ deck, heroIds }: { deck: Deck; heroIds: string[] }) 
     };
   }, [deck.today]);
 
-  /* The hero's own session, so an empty list can say where the day went. */
+  /**
+   * ANSWERABLE: it has started, it is not running, and nobody has marked it.
+   *
+   * The start time is the line and not the end time — a 6:00 client who left
+   * at 6:40 is marked at 6:41 by a trainer between sessions, and making them
+   * wait for the booked hour to run out is the *Later* this screen removed. A
+   * running log is the console's to close; a cancelled or no-show row is
+   * `dead` and already answered.
+   */
+  const answerable = (s: DeckSession) => !s.done && !s.dead && !s.live && s.at <= now;
+  const toLog = rest.filter((s) => answerable(s) && stateOf(s.id).kind !== 'done');
+
+
   const lead = deck.today.find((s) => s.id === heroIds[0]) ?? null;
   const restLive = rest.filter((s) => !s.done).length;
   const restDone = rest.length - restLive;
 
+  /* A row answered in this sitting is not `done` in the deck until the refresh
+     lands, so it stays drawn under its mode and the receipt is read where the
+     button was. */
   const visible = rest.filter((s) =>
     s.done ? filters.done : filters[s.mode as keyof Filters],
   );
 
-  /*
-   * Nothing left once the hero's card is out is the commonest shape of a light
-   * day — one session, drawn in full above — and it needs no module at all. The
-   * hero has already said everything there is to say.
-   */
+  /* *Mark all* marks what the trainer can SEE. A filter hiding the online
+     session is a choice not to look at it, and a bulk write must never reach a
+     row that is off the screen — so the count on the button can be smaller
+     than the count beside the title, and says so by being its own number. */
+  const bulk = visible.filter((s) => {
+    const k = stateOf(s.id).kind;
+    return answerable(s) && (k === 'rest' || k === 'failed');
+  });
+
+  /* THE FILTER HINT (revamp review, 26 Nov 2026). The head counts the DAY
+     (*4 to log*) and a filter can hide one of them — so the card said 4 and
+     drew 3, and the trainer had no way to tell a filter from a bug. Said
+     under the list, with the one press that shows them. */
+  const hiddenToLog = toLog.filter((s) => !visible.includes(s));
+  const showHidden = () =>
+    writeFilters({
+      ...filters,
+      ...Object.fromEntries(hiddenToLog.map((s) => [s.mode, true])),
+    });
+
+  /* One session, drawn in full above, is the commonest light day — it needs no
+     module at all. */
   if (rest.length === 0) return null;
+
+  const logging = dayOver && toLog.length > 0;
 
   return (
     <Slab
-      title="The rest of today"
-      action={{ label: 'Full schedule', href: '/schedule?view=day' }}
+      title={logging ? 'Log today’s sessions' : dayOver ? 'Today’s sessions' : 'The rest of today'}
+      count={logging ? toLog.length : undefined}
+      countLabel={logging ? 'to log' : undefined}
+      countTone={logging ? 'warn' : undefined}
+      flush
+      lead={
+        logging || toLog.length > 0
+          ? 'Pack balances only change once a session is marked done or no-show.'
+          : undefined
+      }
+      button={
+        bulk.length > 1 ? (
+          <Button variant="ink" disabled={holding} onClick={() => markAll(bulk)}>
+            <Check size={15} />
+            Mark all {bulk.length} done
+          </Button>
+        ) : undefined
+      }
+      action={bulk.length > 1 ? undefined : { label: 'Full schedule', href: '/schedule?view=day' }}
       controls={
-        /*
-          THE FILTERS, DE-LIMED.
-
-          These were three `ui/Chip`s, and a pressed Chip is a filled lime pill.
-          Two of the three are pressed by default, so the screen opened with a
-          row of lime plates directly above the day — in the same colour as the
-          primary verb four inches up the page. Lime is the action colour here;
-          a filter takes no action. Selected is an ink plate now, and "Done",
-          the least urgent count on the screen, is no longer the loudest thing
-          on it.
-        */
+        /* Ink, not lime, when pressed: lime is the action colour here and a
+           filter takes no action. */
         <Segment label="Filter the day">
           {(['floor', 'remote'] as DeliveryMode[]).map((mode) => (
             <SegmentButton
@@ -405,29 +469,16 @@ export function TodayList({ deck, heroIds }: { deck: Deck; heroIds: string[] }) 
               {MODE_LABELS[mode]}
             </SegmentButton>
           ))}
-          <SegmentButton
-            pressed={filters.done}
-            onClick={() => toggle('done')}
-            count={counts.done}
-          >
+          <SegmentButton pressed={filters.done} onClick={() => toggle('done')} count={counts.done}>
             Done
           </SegmentButton>
         </Segment>
       }
     >
       {visible.length === 0 ? (
-        /*
-          WHY THE LIST IS EMPTY, SAID AS A FACT ABOUT THE DAY.
-
-          The commonest way to land here is not a filter somebody set: it is an
-          evening where the one session still to come is the hero's card above
-          (left out of this list on purpose) and everything else is done (hidden
-          by default). "Nothing in this filter" read as *you have nothing left
-          today* to a trainer looking at a 6:15 PM booking. So when nothing live
-          is left below the hero, the line names the hero's session, and the done
-          ones are one press away.
-        */
-        <p className="small" style={{ paddingTop: 4 }}>
+        /* Why the list is empty, said as a fact about the day. The commonest way
+           here is an evening whose one session left is the hero's card. */
+        <p className="slab__empty">
           {restLive === 0 && lead && !lead.done ? (
             <>
               <b className="ink">
@@ -449,82 +500,64 @@ export function TodayList({ deck, heroIds }: { deck: Deck; heroIds: string[] }) 
           )}
         </p>
       ) : (
-        <Agenda>
-          {visible.map((s) => (
-            <SessionRow
-              key={s.id}
-              session={s}
-              next={s.id === deck.next?.id}
-              /* 1 -> the row the second hero card is already drawing. Anything
-                 else is not a hero card and carries no class. */
-              heroCard={heroIds.indexOf(s.id)}
-            />
-          ))}
+        <Agenda label="Today’s sessions">
+          {visible.map((s) => {
+            const state = stateOf(s.id);
+            const rowState = s.live
+              ? 'now'
+              : s.done || state.kind === 'done'
+                ? 'done'
+                : s.id === deck.next?.id
+                  ? 'next'
+                  : 'idle';
+            return (
+              <AgendaRow
+                key={s.id}
+                href={`/sessions/${s.id}`}
+                time={s.time}
+                meridiem={s.meridiem}
+                avatar={<Avatar name={s.clientName} id={s.clientId} />}
+                name={s.clientName}
+                detail={s.detail}
+                state={rowState}
+                trailing={
+                  <>
+                    {/* Trial / Free first — the one fact that changes what the
+                        trainer does in the session (22 Nov 2026). */}
+                    {s.billing && freeTag(s.billing) && <Tag tone="acc">{freeTag(s.billing)}</Tag>}
+                    <Tag tone={s.mode}>{MODE_LABELS[s.mode]}</Tag>
+                  </>
+                }
+                actions={
+                  answerable(s) || state.kind === 'done' ? (
+                    <MarkAnswer
+                      state={state}
+                      clientName={s.clientName}
+                      onAnswer={(came) => void answer(s, came)}
+                    />
+                  ) : s.live ? (
+                    <Tag tone="acc">In session</Tag>
+                  ) : undefined
+                }
+                /* The second hero card draws this session above 1080px, so the
+                   row hides itself there — never while the day is over, when
+                   there is no second hero card for today. */
+                className={!dayOver && heroIds.indexOf(s.id) === 1 ? 'srow--h2' : undefined}
+              />
+            );
+          })}
         </Agenda>
       )}
+      {hiddenToLog.length > 0 && (
+        <p className="slab__hint">
+          {hiddenToLog.length} more to log {hiddenToLog.length === 1 ? 'is' : 'are'} hidden by
+          your filter ({[...new Set(hiddenToLog.map((s) => MODE_LABELS[s.mode]))].join(', ')}).{' '}
+          <button type="button" className="tdl__show" onClick={showHidden}>
+            Show {hiddenToLog.length === 1 ? 'it' : 'them'}
+          </button>
+        </p>
+      )}
     </Slab>
-  );
-}
-
-/**
- * One session.
- *
- * The spine down the left edge is the app's `Row` `spine` prop — *now*, *done* or
- * nothing — and it carries the state the row's own ink cannot: a delivered session
- * dims, and a dim row next to a dim row needs an edge to say which one is the next
- * thing that happens. `live` beats `next`: a session being logged right now is the
- * one the hero is about, and the two must not disagree.
- *
- * The whole row is the link, to `/sessions/{id}` — the same target the ribbon's
- * blocks and the rail's pins use. It pointed at `/clients/{id}` until 28 Aug
- * 2026, for the reason written here at the time: *`/sessions/{id}` is still a
- * placeholder and a client's file is where the answer actually is.* It is not a
- * placeholder any more. It carries the plan, the log, the client's pinned notes
- * and — on a session nobody closed — the sentence saying so, which is a strictly
- * better answer to "what is this row" than a file scoped to the whole client.
- */
-function SessionRow({
-  session,
-  next,
-  heroCard = -1,
-}: {
-  session: DeckSession;
-  next: boolean;
-  /**
-   * Which hero card is drawing this same session, 1-based-ish: 1 is the second
-   * card, and anything else means no card is. Index 0 never reaches here — that
-   * row is filtered out in `TodayList` — and the hero stops at two, so 1 is the
-   * only value that marks anything.
-   */
-  heroCard?: number;
-}) {
-  const state = session.live ? 'now' : session.done ? 'done' : next ? 'next' : 'idle';
-  return (
-    <AgendaRow
-      href={`/sessions/${session.id}`}
-      time={session.time}
-      meridiem={session.meridiem}
-      avatar={<Avatar name={session.clientName} id={session.clientId} size="sm" />}
-      name={session.clientName}
-      detail={session.detail}
-      state={state}
-      /* The mode tag, on a row that has not happened yet. `AgendaRow` swaps the
-         tick in for a delivered one: there is one slot at the end of the row and
-         "delivered" outranks "in person" in it. */
-      trailing={
-        <>
-          {/* Trial / Free first — the one fact about this row that changes what
-              the trainer does in it (22 Nov 2026). */}
-          {session.billing && freeTag(session.billing) && <Tag tone="acc">{freeTag(session.billing)}</Tag>}
-          <Tag tone={session.mode}>{MODE_LABELS[session.mode]}</Tag>
-        </>
-      }
-      /* The second hero card draws this same session above 1080px, so the row
-         hides itself there rather than showing the client twice inside 400px.
-         The class is still `.srow--h2` because the rule that reads it is the
-         app's own and is keyed on nothing else. */
-      className={heroCard === 1 ? 'srow--h2' : undefined}
-    />
   );
 }
 

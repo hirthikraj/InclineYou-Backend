@@ -9,6 +9,7 @@ import type { DayMoney, Gap } from '@/lib/today/day';
 import { GAP_FOLD_MIN, gapWorth, sellableNote } from '@/lib/today/day';
 import {
   WEEKDAYS_LONG,
+  dayStamp,
   formatMinute,
   formatMinuteRange,
   formatSpan,
@@ -18,7 +19,7 @@ import {
 } from '@/lib/today/time';
 import { MODE_LABELS, type DeliveryMode } from '@/lib/today/mode';
 import {
-  Calendar, Check, Clock, No, Note, Pin, Play, Plus, Rupee, Warn,
+  Calendar, Check, Chevron, Clock, No, Note, Pin, Play, Plus, Rupee, Warn,
 } from '@/components/shell/Icons';
 import { Elapsed, Relative, elapsedMinutes, minutesUntil } from './Clock';
 import { NudgeButton } from '@/components/nudge/NudgeButton';
@@ -517,14 +518,36 @@ function Tomorrow({
   gymName: string | null;
 }) {
   const weekday = WEEKDAYS_LONG[isoWeekday(session.at)];
+  const first = session.clientName.split(' ')[0];
+  const clock = formatMinute(minuteOfDay(session.at));
+  /*
+   * THE REVAMP (26 Nov 2026), from the reference's *Tomorrow* card.
+   *
+   *   · The time and the person sit side by side (`inline`): one fact.
+   *   · *See tomorrow* became the kicker's own link, *6 sessions →*, which
+   *     says how much is behind the door as well as where it goes.
+   *   · *Nothing overlaps* was a ruled band repeating the count and the time
+   *     the card had just printed. It is the foot's status now, in four
+   *     words. A clash still takes the warn band — that one is a decision.
+   *   · *Ask to confirm* is *Remind Meera*: a named verb reads as the message
+   *     it sends (`session_reminder`, which is worded for exactly this
+   *     evening), and it is the one action, so it is a secondary plate.
+   */
   return (
     <HeroCard
       quiet
-      kicker={`Tomorrow · ${weekday}`}
-      figure={formatMinute(minuteOfDay(session.at))}
+      inline
+      kicker={`Tomorrow · ${dayStamp(session.at).replace(' · ', ' ')}`}
+      kickerAction={
+        <Link className="hro__kl" href="/schedule">
+          {count} session{count === 1 ? '' : 's'}
+          <Chevron size={13} />
+        </Link>
+      }
+      figure={clock}
       name={session.clientName}
       nameHref={`/sessions/${session.id}`}
-      detail={<>{session.detail}<i>{count} session{count === 1 ? '' : 's'} tomorrow</i></>}
+      detail={<>{session.detail}<i>first session of the day</i></>}
       chips={<SessionChips session={session} gymName={gymName} />}
       band={
         clash
@@ -541,45 +564,32 @@ function Tomorrow({
                 </>
               ),
             }
-          : {
-              icon: <Calendar size={16} />,
-              text: (
-                <>
-                  <b>Nothing overlaps.</b> {count} session{count === 1 ? '' : 's'} tomorrow, first
-                  at {formatMinute(minuteOfDay(session.at))}.
-                </>
-              ),
-            }
+          : undefined
+      }
+      foot={
+        clash ? (
+          <Button href="/schedule" variant="primary" size="sm">
+            <Calendar size={15} />
+            Fix the clash
+          </Button>
+        ) : (
+          <>
+            <Check size={14} />
+            No clashes tomorrow
+          </>
+        )
       }
       actions={
-        <>
-          {clash && (
-            <Button href="/schedule" variant="primary" size="sm">
-              <Calendar size={15} />
-              Fix the clash
-            </Button>
-          )}
-          <Link className={`btn btn--sm btn--${clash ? 'ghost' : 'secondary'}`} href="/schedule">
-            See tomorrow
-          </Link>
-          {/*
-            *Confirm* on the evening card, which is the one moment in the day it
-            is the right verb. `session_reminder`'s wording is literally "a
-            reminder for your training session tomorrow" — a message that is
-            wrong at every other hour and exactly right at 20:52, which is when
-            this card is on screen.
-          */}
-          <NudgeButton
-            clientId={session.clientId}
-            clientName={session.clientName}
-            template="session_reminder"
-            label="Ask to confirm"
-            className="btn btn--sm btn--ghost"
-            showContactedNote={false}
-          />
-        </>
+        <NudgeButton
+          clientId={session.clientId}
+          clientName={session.clientName}
+          template="session_reminder"
+          label={`Remind ${first}`}
+          className="btn btn--secondary"
+          showContactedNote={false}
+        />
       }
-      label={`Tomorrow, ${weekday}: ${session.clientName} at ${formatMinute(minuteOfDay(session.at))}, ${count} sessions${clash ? ', one clash' : ''}`}
+      label={`Tomorrow, ${weekday}: ${session.clientName} at ${clock}, ${count} sessions${clash ? ', one clash' : ''}`}
     />
   );
 }
@@ -624,6 +634,7 @@ function DayClosed({
    * evening is about.
    */
   const unmarkedToday = sessions.filter((s) => !s.done && !s.dead).length;
+  const booked = sessions.filter((s) => !s.dead).length;
 
   /*
    * THE SENTENCE HAD TO BE REWRITTEN AFTER RENDERING IT.
@@ -661,72 +672,79 @@ function DayClosed({
         )
       : null;
 
+  /*
+   * THE REVAMP (26 Nov 2026): *Today's earnings*, the reference's card.
+   *
+   * The figure is still the trainer's own (*yours*) with what was billed beside
+   * it — the reference shows billing alone, and on a gym split those are two
+   * different numbers. The unsold hours are no longer an amber banner: an empty
+   * hour is a fact about the day, not a fault, so it is a quiet row with a clock
+   * tile and its own door (*Open slots*). *Log today's sessions* left this card
+   * for the card that does the logging (`TodayList`), where every row can be
+   * answered in place.
+   */
   return (
     <HeroCard
       quiet
-      kicker="The day, closed"
-      figure={rupees(money.yours)}
-      unit="yours"
-      name={`of ${rupees(money.billed)} billed`}
+      kicker="Today’s earnings"
+      kickerAction={
+        <Link className="hro__kl" href="/business">
+          Money book
+          <Chevron size={13} />
+        </Link>
+      }
+      /* One figure when nothing is split (*₹2,000 billed*), the trainer's own
+         when a gym takes a cut (*₹1,600 yours · of ₹2,000 billed*). It read
+         *₹2,000 yours · of ₹2,000 billed* — one number twice. */
+      figure={rupees(money.cut > 0 ? money.yours : money.billed)}
+      unit={money.cut > 0 ? 'yours' : 'billed'}
       detail={
         <>
-          {delivered} session{delivered === 1 ? '' : 's'} delivered
-          {/* Each extra fact is set apart by the 12px gap rather than by another
-              middle dot. Three facts joined by two dots is a line where the
-              separator has stopped separating anything. */}
+          {/* *0 sessions delivered* beside ₹2,000 read as billing for nothing;
+              the sessions ran, nobody has logged them yet. Plain text when it
+              leads the line, an <i> (the 12px gap) when a fact precedes it. */}
+          {money.cut > 0 ? (
+            <>
+              of {rupees(money.billed)} billed<i>{delivered} of {booked} logged</i>
+            </>
+          ) : (
+            <>{delivered} of {booked} logged</>
+          )}
           {money.cut > 0 && <i>{rupees(money.cut)} to the gym</i>}
-          {money.partial && <i>{money.priced} of {money.total} priced</i>}
+          {money.partial && <i>{money.priced} of {money.total} sessions priced</i>}
         </>
       }
       band={
         largest
           ? {
-              icon: <Rupee size={16} />,
-              tone: 'warn',
+              icon: <Clock size={16} />,
+              title: <>{formatSpan(unsoldMinutes)} unbooked today</>,
               text:
                 gaps.length === 1 ? (
                   <>
-                    <b>
-                      {formatMinuteRange(largest.startMinute, largest.endMinute)} went
-                      unsold
-                    </b>{' '}
-                    ({formatSpan(largest.minutes)} inside your own hours
-                    {worth && <>, {worth}</>}).
+                    {formatMinuteRange(largest.startMinute, largest.endMinute)} inside your own
+                    hours.{worth && <> At your usual rate: {worth}.</>}
                   </>
                 ) : (
                   <>
-                    <b>
-                      {formatSpan(unsoldMinutes)} went unsold across {gaps.length} empty windows
-                    </b>
-                    {total && <>, {total}</>}. The longest was{' '}
+                    {gaps.length} open gaps, the longest{' '}
                     {formatMinuteRange(largest.startMinute, largest.endMinute)}.
+                    {total && <> At your usual rate: {total}.</>}
                   </>
                 ),
-            }
-          : {
-              icon: <Clock size={16} />,
-              text: (
-                <>
-                  <b>Every sellable hour was sold.</b> Nothing inside your own hours went empty
-                  today.
-                </>
+              action: (
+                <Link className="hro__kl hro__kl--u" href="/schedule?view=day">
+                  Open slots
+                </Link>
               ),
             }
+          : {
+              icon: <Check size={16} />,
+              title: 'Every sellable hour was sold',
+              text: 'Nothing inside your own hours went empty today.',
+            }
       }
-      actions={
-        unmarkedToday > 0 ? (
-          <Button href="/programs/workouts?view=missed" variant="primary" size="sm">
-            <Check size={15} />
-            Log today’s {unmarkedToday === 1 ? 'session' : `${unmarkedToday} sessions`}
-          </Button>
-        ) : (
-          <Button href="/business" variant="secondary" size="sm">
-            <Rupee size={15} />
-            Open the money book
-          </Button>
-        )
-      }
-      label={`The day, closed: ${money.yours} rupees yours of ${money.billed} billed${unmarkedToday > 0 ? `, ${unmarkedToday} not yet marked` : ''}`}
+      label={`Today’s earnings: ${money.yours} rupees yours of ${money.billed} billed${unmarkedToday > 0 ? `, ${unmarkedToday} not yet marked` : ''}`}
     />
   );
 }

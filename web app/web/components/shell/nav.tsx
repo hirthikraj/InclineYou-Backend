@@ -156,6 +156,13 @@ export interface SectionPage {
   href: string;
   /** Drawn only when the trainer's profile has it — see `NavFlags.tsx`. */
   needs?: 'gym';
+  /**
+   * One line on what is behind the page, for the hover card (26 Nov 2026).
+   * The sidebar shows a section's page NAMES in place; the card is where a
+   * trainer who has not opened *Workouts* yet learns it is the sessions that
+   * already happened, before spending a navigation on finding out.
+   */
+  hint?: string;
 }
 
 export const PRIMARY: Destination[] = [
@@ -186,8 +193,8 @@ export const PRIMARY: Destination[] = [
        sixth rail row for it would take the five back to six, which is the count
        that made the column a taxonomy the last time. */
     pages: [
-      { key: 'roster', icon: <Users size={17} />, label: 'All clients', href: '/clients' },
-      { key: 'assessments', icon: <Ruler size={17} />, label: 'Assessments', href: '/clients/assessments' },
+      { key: 'roster', icon: <Users size={17} />, label: 'All clients', href: '/clients', hint: 'Everyone you train, who needs you first' },
+      { key: 'assessments', icon: <Ruler size={17} />, label: 'Assessments', href: '/clients/assessments', hint: 'Check-ins to take, review and compare' },
     ],
   },
   {
@@ -226,9 +233,9 @@ export const PRIMARY: Destination[] = [
        `activePageKey` needs nothing for this: `/programs/certified` starts with
        `/programs/`, so it lights *Programs* — which is now the true answer. */
     pages: [
-      { key: 'programs', icon: <Grid size={17} />, label: 'Programs', href: '/programs' },
-      { key: 'workouts', icon: <Dumbbell size={17} />, label: 'Workouts', href: '/programs/workouts' },
-      { key: 'exercises', icon: <Dots6 size={17} />, label: 'Exercise library', href: '/programs/exercises' },
+      { key: 'programs', icon: <Grid size={17} />, label: 'Programs', href: '/programs', hint: 'Your plans, and the templates to start from' },
+      { key: 'workouts', icon: <Dumbbell size={17} />, label: 'Workouts', href: '/programs/workouts', hint: 'Sessions done, booked and missed' },
+      { key: 'exercises', icon: <Dots6 size={17} />, label: 'Exercise library', href: '/programs/exercises', hint: 'Every movement, and the ones you added' },
     ],
   },
   {
@@ -274,17 +281,17 @@ export const PRIMARY: Destination[] = [
        price list is edited; the last three are read monthly, quarterly and
        yearly in that order. */
     pages: [
-      { key: 'overview', icon: <Grid size={17} />, label: 'Overview', href: '/business' },
+      { key: 'overview', icon: <Grid size={17} />, label: 'Overview', href: '/business', hint: 'What came in, what is owed, what is ending' },
       /* *Transactions* until 23 Nov 2026; renamed for what it answers — every rupee by state, starting with what clients
          say they have paid (V50). `/business/transactions` redirects. */
-      { key: 'transactions', icon: <Rupee size={17} />, label: 'Payments', href: '/business/payments' },
-      { key: 'packages', icon: <Stack size={17} />, label: 'Packages', href: '/business/packages' },
+      { key: 'transactions', icon: <Rupee size={17} />, label: 'Payments', href: '/business/payments', hint: 'Every payment, and the ones to confirm' },
+      { key: 'packages', icon: <Stack size={17} />, label: 'Packages', href: '/business/packages', hint: 'Your price list' },
       /* Only for a trainer with a gym: the split on the gym's money and what the gym
          owes them. `NavFlags.tsx` hides the row; the route stays reachable. */
-      { key: 'gym', icon: <Wallet size={17} />, label: 'Gym share', href: '/business/gym', needs: 'gym' },
-      { key: 'reports', icon: <Chart size={17} />, label: 'Reports', href: '/business/reports' },
+      { key: 'gym', icon: <Wallet size={17} />, label: 'Gym share', href: '/business/gym', needs: 'gym', hint: 'What you and the gym owe each other' },
+      { key: 'reports', icon: <Chart size={17} />, label: 'Reports', href: '/business/reports', hint: 'Your year, in numbers' },
       /* V50 · how clients pay: the UPI ID, its QR, part payments and (coming) Razorpay autopay. Last — set once, read rarely. */
-      { key: 'payment-setup', icon: <Gear size={17} />, label: 'Payment setup', href: '/business/payment-setup' },
+      { key: 'payment-setup', icon: <Gear size={17} />, label: 'Payment setup', href: '/business/payment-setup', hint: 'UPI ID, part payments, collecting at the gym' },
     ],
   },
 ];

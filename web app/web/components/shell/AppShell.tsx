@@ -1,17 +1,18 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 
 import type { Workspace } from '@/lib/workspace/types';
 
-import { sectionFor, type RailKey } from './nav';
+import { activePageKey, sectionFor, type RailKey } from './nav';
 import { PaletteHost } from './PaletteHost';
 import { Rail } from './Rail';
-import { NavFlagsProvider } from './NavFlags';
+import { NavFlagsProvider, visiblePages } from './NavFlags';
 import { SectionPane } from './SectionPane';
-import { usePaneCollapsed, usePaneCollapseShortcut } from './paneCollapse';
+import { SIDEBAR_KEY, usePaneCollapsed, usePaneCollapseShortcut } from './paneCollapse';
 import { usePanePreview } from './panePreview';
+import { useTodayBadge } from './railCount';
 import { TabBar } from './TabBar';
 import { ToastHost } from './ToastHost';
 import { WorkspaceHost } from './WorkspaceHost';
@@ -41,6 +42,24 @@ import { WorkspaceHost } from './WorkspaceHost';
  * `/settings` and `/team` resolve to keys no `PRIMARY` row carries, so the rail
  * lights nothing and the bar lights *More* — the true answer on both.
  */
+/** Is `p` inside the triangle `from` → the card's top-left → bottom-left? */
+function inTriangle(
+  p: { x: number; y: number },
+  from: { x: number; y: number },
+  card: DOMRect,
+): boolean {
+  const t = { x: card.left, y: card.top };
+  const u = { x: card.left, y: card.bottom };
+  const side = (a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }) =>
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const d1 = side(from, t, p);
+  const d2 = side(t, u, p);
+  const d3 = side(u, from, p);
+  const neg = d1 < 0 || d2 < 0 || d3 < 0;
+  const pos = d1 > 0 || d2 > 0 || d3 > 0;
+  return !(neg && pos);
+}
+
 function currentFor(pathname: string): RailKey {
   if (pathname.startsWith('/today')) return 'today';
   if (pathname.startsWith('/clients')) return 'clients';
@@ -111,11 +130,16 @@ export function AppShell({
      that does. Since 14 Sep 2026 the collapsed pane is not a 56px strip — the
      track slides to 0 and the whole column goes with it — and the switch that
      brings it back is in the RAIL, the only column that is always drawn. */
-  const [paneCollapsed, togglePane] = usePaneCollapsed();
+  const [paneCollapsed, togglePane] = usePaneCollapsed(SIDEBAR_KEY);
 
   /* `[`, and only where there is a pane to collapse. `paneCollapse.ts` has the
      guard list and why. */
-  usePaneCollapseShortcut(togglePane, Boolean(section));
+  /* THE SIDEBAR'S SWITCH, since 26 Nov 2026. The rail + section pane became
+     one labelled sidebar with the current section's pages nested in it; the
+     remembered "collapsed" answer (same key, so nobody's choice was lost) now
+     narrows the SIDEBAR to the 64px icon rail, on every route — so `[` works
+     everywhere, not only where there used to be a pane. */
+  usePaneCollapseShortcut(togglePane, true);
 
   /* AND THE OTHER WAY IN: rest on a rail row and that section's pages open
      WITHOUT NAVIGATING. Transient, never written down, and `panePreview.ts`
@@ -133,14 +157,50 @@ export function AppShell({
      Either way the ROUTE is untouched: `section` still says where the trainer
      is, `previewSection` says what they are pointing at, and the pinned state
      never learns a hover happened. */
+  const todayBadge = useTodayBadge();
   const preview = usePanePreview<RailKey>();
+  /* Where the hovered row is, so the card opens beside it. */
+  const [anchorTop, setAnchorTop] = useState(0);
+  /* The last two pointer positions while a card is open — the menu-aim test
+     below needs a direction, and two samples are one. */
+  const trail = useRef<{ x: number; y: number }[]>([]);
+  useEffect(() => {
+    if (!preview.key) return;
+    const onMove = (e: MouseEvent) => {
+      trail.current = [...trail.current.slice(-1), { x: e.clientX, y: e.clientY }];
+    };
+    document.addEventListener('mousemove', onMove);
+    return () => document.removeEventListener('mousemove', onMove);
+  }, [preview.key]);
+
+  const onPreview = useCallback(
+    (key: RailKey | null, top?: number) => {
+      /* AIMING: is the pointer inside the triangle from where it just was to
+         the open card's near edge? Then the row it is crossing is on the way,
+         not the destination (`AIM_DELAY` in panePreview.ts). */
+      const card = document.querySelector('.pane--float.pane--open')?.getBoundingClientRect();
+      const [a, b] = trail.current;
+      const aiming = Boolean(card && a && b && b.x > a.x && inTriangle(b, a, card));
+      if (key && typeof top === 'number' && !aiming) setAnchorTop(top);
+      preview.enter(key, aiming);
+    },
+    [preview],
+  );
+  /* The current section's pages, nested under its row while the sidebar is
+     open — the second column's job, done in the first. */
+  const sub =
+    section && !paneCollapsed
+      ? (() => {
+          const pages = visiblePages(section.pages ?? [], { hasGym });
+          return { pages, active: activePageKey(pages, pathname) };
+        })()
+      : undefined;
   const previewSection = preview.key ? sectionFor(preview.key) : undefined;
   /* What the flyout renders while it fades out — see `shown`. Falls back to the
      live one so the first open has something on frame one. */
   const shownSection = sectionFor(preview.shown ?? preview.key ?? current);
   /* The track is a column the trainer can see. When it is, the preview goes in
      it; when it is not, the preview floats. */
-  const trackOpen = Boolean(section) && !paneCollapsed;
 
   /* A CLICK IN THE FLYOUT IS A NAVIGATION, AND A NAVIGATION ENDS THE QUESTION.
      Without this the flyout hangs under the pointer after the page it opened has
@@ -157,9 +217,7 @@ export function AppShell({
   return (
     <NavFlagsProvider value={{ hasGym }}>
     <div
-      className={`app app--rail-min${section ? ' app--pane' : ''}${
-        section && paneCollapsed ? ' app--pane-min' : ''
-      }`}
+      className={`app app--side${paneCollapsed ? ' app--rail-min' : ''}`}
       data-glass="on"
     >
       {/* Wraps the whole shell rather than only `children`, so the Rail and the
@@ -202,12 +260,10 @@ export function AppShell({
             /* Only where there is a pane to close, which is the same condition
                the `[` shortcut is bound under. A switch on `/today` would toggle
                a remembered answer nothing on screen reflects. */
-            pane={
-              section
-                ? { label: section.label, collapsed: paneCollapsed, onToggle: togglePane }
-                : undefined
-            }
-            onPreview={preview.enter}
+            pane={{ label: 'sidebar', collapsed: paneCollapsed, onToggle: togglePane }}
+            sub={sub}
+            counts={todayBadge ? { today: todayBadge } : {}}
+            onPreview={onPreview}
             onPreviewLeave={preview.leave}
           />
           {/* AFTER the rail, which is the reading order
@@ -221,23 +277,18 @@ export function AppShell({
               the column" half — and the route's section otherwise. `section` is
               what decides whether the column EXISTS, because the track belongs
               to the route; the preview only decides what is printed in it. */}
-          {section && (
-            <SectionPane
-              section={(trackOpen && previewSection) || section}
-              pathname={pathname}
-              hover={{ hold: preview.hold, leave: preview.leave }}
-            />
-          )}
-          {/* THE FLYOUT, and it is rendered whenever the track is not a column
-              the trainer can see — collapsed, or a route with no section at all.
-              MOUNTED EVEN WHEN CLOSED: it fades and slides out, and React
-              unmounting it on frame one would take the exit with it. */}
-          {!trackOpen && shownSection && (
+          {/* THE HOVER CARD — a section's pages beside the row that asked,
+              in either width of the sidebar. Never for the section already
+              nested in place (the rail reports `null` for that row). MOUNTED
+              EVEN WHEN CLOSED: it fades out, and unmounting on frame one would
+              take the exit with it. */}
+          {shownSection && (
             <SectionPane
               section={shownSection}
               pathname={pathname}
               float
               open={Boolean(previewSection)}
+              anchorTop={anchorTop}
               hover={{ hold: preview.hold, leave: preview.leave }}
             />
           )}

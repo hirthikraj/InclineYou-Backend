@@ -55,8 +55,17 @@ export function SectionPane({
   pathname,
   float = false,
   open = false,
+  anchorTop,
   hover,
 }: {
+  /**
+   * The hovered row's top edge (26 Nov 2026). The flyout used to be a
+   * full-height slab from the top of the window, which put *Programs* 200px
+   * above the *Fitness* row that asked for it. As a card beside the row, the
+   * eye travels sideways, not up. Handed over as a custom property, not as
+   * `top`, so the stylesheet still decides the geometry (trap 2).
+   */
+  anchorTop?: number;
   /** The destination whose `pages` this draws. `AppShell` resolves it with
    *  `sectionFor`, which is what guarantees `pages` is non-empty here. */
   section: Destination;
@@ -106,6 +115,7 @@ export function SectionPane({
        it, and this column has no such state left. */
     <nav
       className={`pane${float ? ' pane--float' : ''}${float && open ? ' pane--open' : ''}`}
+      style={anchorTop !== undefined ? ({ '--pane-at': `${anchorTop}px` } as React.CSSProperties) : undefined}
       aria-label={`${section.label} pages`}
       /* `aria-hidden` and `inert` are NOT here, and that is not an oversight —
          a closed flyout is `visibility:hidden` in app.css, which takes it out of
@@ -117,6 +127,30 @@ export function SectionPane({
       onFocus={hover?.hold}
       onMouseLeave={hover?.leave}
       onBlur={hover?.leave}
+      /* Inside the hover card: ↑ ↓ move between pages, ← and Esc go back to the
+         section's row in the sidebar (and the card closes when focus leaves). */
+      onKeyDown={
+        float
+          ? (e) => {
+              const items = [...e.currentTarget.querySelectorAll<HTMLElement>('.pane__i')];
+              const at = items.indexOf(document.activeElement as HTMLElement);
+              if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                const step = e.key === 'ArrowDown' ? 1 : -1;
+                items[(at + step + items.length) % items.length]?.focus();
+              } else if (e.key === 'ArrowLeft' || e.key === 'Escape') {
+                const row = document.querySelector<HTMLElement>(`.rail__i[href="${section.href}"]`);
+                if (row) {
+                  e.preventDefault();
+                  row.focus();
+                  /* Focusing the row re-asks for this card; Esc means "close",
+                     so the close is scheduled after it and wins (one timer). */
+                  if (e.key === 'Escape') hover?.leave();
+                }
+              }
+            }
+          : undefined
+      }
     >
       <div className="pane__top">
         {/* An `<h2>` and not a `<p>`: it is the heading of a region, it is the
@@ -145,7 +179,11 @@ export function SectionPane({
                 accessible name twice over: `textContent` came back
                 *ProgramsPrograms* until it was marked `aria-hidden`. A state
                 that no longer exists does not need either half. */}
-            <span>{page.label}</span>
+            <span className="pane__l">
+              <span>{page.label}</span>
+              {/* What is behind the page, said before the click. */}
+              {page.hint && <small className="pane__h">{page.hint}</small>}
+            </span>
           </Link>
         ))}
       </div>

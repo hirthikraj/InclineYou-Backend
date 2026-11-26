@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Archivo, Inter, JetBrains_Mono } from 'next/font/google';
+import { Instrument_Sans, JetBrains_Mono } from 'next/font/google';
 
 import { NO_FLASH } from '@/web-components/ui/theme';
 
@@ -16,8 +16,17 @@ import './styles/app.css';
  * because every rule in webapp.css reads `--tx-font`, `--tx-brand` or
  * `--tx-mono` and none of them knows what next/font is.
  */
-const inter = Inter({ subsets: ['latin', 'latin-ext'], display: 'swap', variable: '--f-inter' });
-const archivo = Archivo({ subsets: ['latin', 'latin-ext'], display: 'swap', variable: '--f-archivo' });
+/*
+ * INSTRUMENT SANS, FOR TEXT AND DISPLAY (26 Nov 2026). The Today revamp's
+ * reference is set in it, and the product owner asked for that face app-wide:
+ * it replaced Inter (text) and Archivo (display). One family for both is the
+ * reference's own arrangement — its headings are the text face at 700 with
+ * tight tracking, not a second display face. Matched by rendering five
+ * candidates beside the reference (straight-tailed y, narrow bowls); Geist,
+ * Inter Tight, Hanken and Schibsted were each off on width or the y.
+ * The mono stays JetBrains: the reference's mono is a system fallback.
+ */
+const instrument = Instrument_Sans({ subsets: ['latin', 'latin-ext'], display: 'swap', variable: '--f-sans' });
 const mono = JetBrains_Mono({ subsets: ['latin', 'latin-ext'], display: 'swap', variable: '--f-mono' });
 
 export const metadata: Metadata = {
@@ -54,7 +63,7 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
          trainer loads in light. It suppresses the warning for THIS element's
          own attributes only; children still hydrate strictly. */
       suppressHydrationWarning
-      className={`${inter.variable} ${archivo.variable} ${mono.variable}`}
+      className={`${instrument.variable} ${mono.variable}`}
     >
       <body>
         {/* Re-applies a remembered light theme before the first paint. Inline and

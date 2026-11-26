@@ -1,161 +1,152 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 
 import type { CloseOutSession } from '@/lib/today/deck';
-import { QUEUE_CAP } from '@/lib/today/deck';
-import { clockParts, dayStamp } from '@/lib/today/time';
-import { markDone, markNoShow } from '@/lib/schedule/actions';
+import { clockParts, dayStamp, startOfDay } from '@/lib/today/time';
+import { Agenda, AgendaDay, AgendaRow } from '@/web-components/ui/Agenda';
 import { Avatar } from '@/web-components/ui/Avatar';
 import { Button } from '@/web-components/ui/Button';
 import { Slab } from '@/web-components/ui/Slab';
-import { Tag } from '@/web-components/ui/Tag';
-import { Check } from '@/components/shell/Icons';
-
-type RowState =
-  | { kind: 'rest' }
-  | { kind: 'working' }
-  | { kind: 'done'; word: string; note?: string }
-  | { kind: 'failed'; message: string };
+import { MarkAnswer } from './MarkAnswer';
+import { useMarkRows } from './useMarkRows';
 
 /**
- * CLOSE OUT THE WEEK — past sessions nobody marked, one line each, two answers.
+ * UNMARKED FROM LAST WEEK — past sessions nobody marked, one row each, two
+ * answers, and *Mark all* for the usual case where everybody came.
  *
- * A pack only moves on *done* or *no-show*, so every session on this card is a
- * pack figure that is wrong right now, and so is every total built on it
- * (*Training this month*, attendance, the renewal rows). The queue used to carry
- * these as one `unmarked` row per client whose *Mark* marked the whole week DONE
- * — no way to say somebody did not come — at the bottom of the ladder, where on
- * a real Friday it was folded behind *Show 30 more*.
+ * A pack only moves on *done* or *no-show*, so every session here is a pack
+ * figure that is wrong right now, and so is every total built on it. Oldest
+ * first: the oldest is the one closest to falling out of the week-long window.
  *
- * Oldest first, because the oldest is the one closest to falling out of the
- * week-long window and becoming a money-book job. *No-show · −1* is the diary's
- * own button and takes a session, as the Schedule's does; a trainer who wants to
- * waive it opens the session (the name links to the client).
+ * ── THE REVAMP (26 Nov 2026) ────────────────────────────────────────────────
  *
- * The writes are the Schedule's (`markDone`, `markNoShow`) — one door per verb.
- * They run one at a time per row by construction (a row is disabled while its
- * write is in flight), which matters for the reason `deck.ts` gives: two charges
- * racing against a pack with one session left both read `1`.
+ * Redrawn as the reference's card: the title says WHICH sessions (*Unmarked
+ * from last week* — it was *Close out the last week*, a verb for a card of
+ * answers), the lead says what it costs, and the rows are the same `AgendaRow`
+ * the day's list draws, with the date as the row's `meta`. Approved removals:
+ * the *Diary* column (the same word on every row) and *· −1* on *No-show*
+ * (the lead says it once — see `MarkAnswer`).
+ *
+ * *Mark all N done* is the SECONDARY plate here and the ink plate on today's
+ * card, which is the reference's own ranking: today's sessions are the ones a
+ * trainer remembers; last week's are where a no-show is likelier, so bulk
+ * marking them should not be the loudest thing in the card.
  */
+/**
+ * THREE ROWS, NOT SIX (revamp review, 26 Nov 2026). The reference shows three
+ * and folds the rest, and six pushed *Needs you today* — the money and the
+ * renewals — a screen further down on exactly the mornings a week was left
+ * unmarked. The fold states its count, and every *Mark* verb states its own.
+ */
+const CLOSE_CAP = 3;
+
 export function CloseOut({ sessions }: { sessions: CloseOutSession[] }) {
-  const router = useRouter();
-  const [states, setStates] = useState<Record<string, RowState>>({});
+  const { stateOf, answer, markAll, holding } = useMarkRows();
   const [expanded, setExpanded] = useState(false);
 
   if (sessions.length === 0) return null;
 
-  const set = (id: string, state: RowState) => setStates((prev) => ({ ...prev, [id]: state }));
-
-  const answer = async (s: CloseOutSession, came: boolean) => {
-    set(s.id, { kind: 'working' });
-    const result = came
-      ? await markDone(s.id)
-      : await markNoShow({ id: s.id, costsASession: true });
-    if (!result.ok) {
-      set(s.id, { kind: 'failed', message: result.message ?? 'That did not go through.' });
-      return;
-    }
-    const left = result.sessionsRemaining;
-    set(s.id, {
-      kind: 'done',
-      word: came ? 'Done' : 'No-show',
-      note: result.message ?? (typeof left === 'number' ? `${left} left on the pack` : undefined),
-    });
-    router.refresh();
-  };
-
-  const open = sessions.filter((s) => states[s.id]?.kind !== 'done').length;
-  const visible = expanded ? sessions : sessions.slice(0, QUEUE_CAP);
+  const open = sessions.filter((s) => stateOf(s.id).kind !== 'done');
+  const answerable = open.filter((s) => {
+    const k = stateOf(s.id).kind;
+    return k === 'rest' || k === 'failed';
+  });
+  const visible = expanded ? sessions : sessions.slice(0, CLOSE_CAP);
   const folded = sessions.length - visible.length;
 
+  /* Grouped by day, oldest first — `sessions` arrives sorted. A day's verb
+     marks every unanswered session of THAT day, folded ones included, and its
+     count says how many: *Mark the day done* is the commonest answer to a past
+     week ("Monday, everyone came"). */
+  const days: { at: number; rows: CloseOutSession[] }[] = [];
+  for (const s of visible) {
+    const at = startOfDay(s.at);
+    const last = days[days.length - 1];
+    if (last && last.at === at) last.rows.push(s);
+    else days.push({ at, rows: [s] });
+  }
+  const dayAnswerable = (at: number) =>
+    answerable.filter((s) => startOfDay(s.at) === at);
+  const dayTotal = (at: number) => sessions.filter((s) => startOfDay(s.at) === at).length;
+
   return (
-    <Slab title="Close out the last week" count={open}>
-      <p className="cls__lead">
-        A pack only moves when a session is marked, so these are pack figures that are wrong
-        until you answer them.
-      </p>
-      <div className="q__scroll">
-        <table className="tbl tbl--stack atn cls">
-          <colgroup>
-            <col className="atn__c-who" />
-            <col className="atn__c-why" />
-            <col className="cls__c-act" />
-          </colgroup>
-          <tbody>
-            {visible.map((s) => {
-              const state = states[s.id] ?? { kind: 'rest' };
+    <Slab
+      title="Unmarked from last week"
+      count={open.length}
+      flush
+      lead="Pack balances are off until these are marked. A no-show still uses one session from the pack."
+      button={
+        answerable.length > 1 ? (
+          <Button variant="secondary" disabled={holding} onClick={() => markAll(answerable)}>
+            Mark all {answerable.length} done
+          </Button>
+        ) : undefined
+      }
+    >
+      <Agenda label="Unmarked sessions from last week">
+        {days.flatMap((day) => {
+          const open = dayAnswerable(day.at);
+          const total = dayTotal(day.at);
+          return [
+            <AgendaDay
+              key={`d${day.at}`}
+              title={dayStamp(day.at).replace(' · ', ' ')}
+              aside={`${total} session${total === 1 ? '' : 's'}`}
+              action={
+                open.length > 1 ? (
+                  <button
+                    type="button"
+                    className="agn__day-b"
+                    disabled={holding}
+                    onClick={() => markAll(open)}
+                  >
+                    Mark the day done{open.length < total ? ` (${open.length})` : ''}
+                  </button>
+                ) : undefined
+              }
+            />,
+            ...day.rows.map((s) => {
               const clock = clockParts(s.at);
+              const state = stateOf(s.id);
               return (
-                <tr key={s.id}>
-                  <td className="q__who">
-                    <Link className="who" href={`/clients/${s.clientId}/sessions`}>
-                      <Avatar name={s.clientName} id={s.clientId} size="sm" />
-                      <b>{s.clientName}</b>
-                    </Link>
-                  </td>
-                  <td className="q__why" aria-live="polite">
-                    {state.kind === 'failed' ? (
-                      <span className="q__why--bad">{state.message}</span>
-                    ) : (
-                      <>
-                        <span className="q__k" aria-hidden="true">Diary</span>
-                        <span className="tnum">
-                          {dayStamp(s.at)} · {clock.time} {clock.meridiem}
-                        </span>
-                        {s.dayLabel && <> · {s.dayLabel}</>}
-                        {state.kind === 'done' && state.note && <> · {state.note}</>}
-                      </>
-                    )}
-                  </td>
-                  <td className="q__act cls__act">
-                    {state.kind === 'done' ? (
-                      <Tag tone="ok">
-                        <Check size={12} />
-                        {state.word}
-                      </Tag>
-                    ) : (
-                      <span className="cls__btns">
-                        {/* Secondary, not lime: seven stacked lime buttons made this
-                            list louder than the session about to start. The check
-                            mark keeps Done the obvious answer of the two. */}
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={state.kind === 'working'}
-                          onClick={() => void answer(s, true)}
-                        >
-                          {state.kind === 'working' ? '…' : <><Check size={13} />Done</>}
-                        </Button>
-                        <Button
-                          size="sm"
-                          disabled={state.kind === 'working'}
-                          onClick={() => void answer(s, false)}
-                          aria-label={`No-show for ${s.clientName}, takes one session`}
-                        >
-                          No-show · −1
-                        </Button>
+                <AgendaRow
+                  key={s.id}
+                  href={`/clients/${s.clientId}/sessions`}
+                  avatar={<Avatar name={s.clientName} id={s.clientId} />}
+                  name={s.clientName}
+                  state={state.kind === 'done' ? 'done' : 'idle'}
+                  meta={
+                    <>
+                      <span className="tnum">
+                        {clock.time} {clock.meridiem}
                       </span>
-                    )}
-                  </td>
-                </tr>
+                      {s.dayLabel && <span className="agn__meta-l"> · {s.dayLabel}</span>}
+                    </>
+                  }
+                  actions={
+                    <MarkAnswer
+                      state={state}
+                      clientName={s.clientName}
+                      onAnswer={(came) => void answer(s, came)}
+                    />
+                  }
+                />
               );
-            })}
-          </tbody>
-        </table>
-        {folded > 0 && (
-          <button className="atn__more" type="button" onClick={() => setExpanded(true)}>
-            Show {folded} more {folded === 1 ? 'session' : 'sessions'}
-          </button>
-        )}
-        {expanded && sessions.length > QUEUE_CAP && (
-          <button className="atn__more" type="button" onClick={() => setExpanded(false)}>
-            Show the oldest {QUEUE_CAP} only
-          </button>
-        )}
-      </div>
+            }),
+          ];
+        })}
+      </Agenda>
+      {folded > 0 && (
+        <button className="slab__more" type="button" onClick={() => setExpanded(true)}>
+          Show {folded} more
+        </button>
+      )}
+      {expanded && sessions.length > CLOSE_CAP && (
+        <button className="slab__more" type="button" onClick={() => setExpanded(false)}>
+          Show the oldest {CLOSE_CAP} only
+        </button>
+      )}
     </Slab>
   );
 }

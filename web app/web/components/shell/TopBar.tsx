@@ -66,9 +66,18 @@ export function TopBar({
   crumb,
   title,
   titleHref,
+  subtitle,
   onSearch,
 }: {
   crumb: string;
+  /**
+   * A second line under the phone's title (26 Nov 2026). Under 900px a
+   * screen's own `.ph` header can be hidden (Today's is), which took the date
+   * and the day's state off the phone entirely — the one screen whose whole
+   * subject is *today*. Drawn under the title, small, and only on a phone,
+   * where the title is the bar's own; a desk's bar shows neither.
+   */
+  subtitle?: string;
   /**
    * What the phone's header calls this screen. Defaults to the crumb's last
    * segment — see `screenTitle`. Pass it only when that is wrong: the workout
@@ -217,8 +226,9 @@ export function TopBar({
           {title ?? screenTitle(crumb)}
         </Link>
       ) : (
-        <p className="top__title" aria-hidden="true">
-          {title ?? screenTitle(crumb)}
+        <p className={`top__title${subtitle ? ' top__title--sub' : ''}`} aria-hidden="true">
+          <span className="top__tt">{title ?? screenTitle(crumb)}</span>
+          {subtitle && <span className="top__ts">{subtitle}</span>}
         </p>
       )}
 

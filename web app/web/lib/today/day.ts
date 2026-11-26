@@ -499,6 +499,9 @@ export function gapWorth(gap: Gap, money: DayMoney, gymSharePercent: number | nu
   const billed = gap.slots * money.gapRate;
   const share = gymSharePercent != null ? Math.max(0, Math.min(100, gymSharePercent)) : 0;
   const kept = billed - Math.round((billed * share) / 100);
+  /* With no gym share the two figures are one: *₹3,750 billed, ₹3,750 yours*
+     said the same number twice (revamp review, 26 Nov 2026). */
+  if (kept === billed) return rupees(billed);
   return `${rupees(billed)} billed, ${rupees(kept)} yours`;
 }
 

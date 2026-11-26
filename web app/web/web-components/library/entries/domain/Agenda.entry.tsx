@@ -3,6 +3,7 @@ import { SpecTable } from '../../chrome/Docs';
 import { Agenda, AgendaRow } from '../../../ui/Agenda';
 import { Avatar } from '../../../ui/Avatar';
 import { Tag } from '../../../ui/Tag';
+import { Button } from '../../../ui/Button';
 
 /**
  * THE REST OF THE DAY, AS ONE RULED LIST.
@@ -12,6 +13,60 @@ import { Tag } from '../../../ui/Tag';
 export function AgendaEntry() {
   return (
     <>
+      <Blk
+        title="A row you can answer (26 Nov 2026)"
+        lede={
+          <>
+            The Today revamp put <b>Done</b> and <b>No-show</b> on every session that has started and
+            is not marked. The row is a <code>div</code> now and the NAME is the link, stretched over
+            the row, so <code>actions</code> can hold buttons (an anchor may not). Leave out{' '}
+            <code>time</code> and pass <code>meta</code> for a past session identified by its person
+            — <i>Unmarked from last week</i>. On `/today` the rows are 70px with 36px avatars
+            (§R in app.css, scoped); this bench shows the base.
+          </>
+        }
+      >
+        <Bench style={{ alignItems: 'stretch' }}>
+          <Cell label="time gutter · answers on the row" stretch>
+            <Agenda label="Specimen">
+              <AgendaRow
+                href="#"
+                time="6:00"
+                meridiem="AM"
+                avatar={<Avatar name="Kavya Subramanian" id="ks" />}
+                name="Kavya Subramanian"
+                detail="Upper body · Week 6/12"
+                trailing={<Tag tone="remote">Online</Tag>}
+                actions={
+                  <span className="mka">
+                    <Button size="sm">Done</Button>
+                    <Button size="sm">No-show</Button>
+                  </span>
+                }
+              />
+              <AgendaRow href="#" time="7:15" meridiem="AM" avatar={<Avatar name="Suresh Babu" id="sb" />} name="Suresh Babu" detail="Upper body · Week 9/12" state="done" />
+            </Agenda>
+          </Cell>
+        </Bench>
+        <Bench style={{ alignItems: 'stretch' }}>
+          <Cell label="no time · the date as meta" stretch>
+            <Agenda label="Specimen">
+              <AgendaRow
+                href="#"
+                avatar={<Avatar name="Meera Iyer" id="mi" />}
+                name="Meera Iyer"
+                meta={<span className="tnum">Mon 23 Nov, 6:00 AM</span>}
+                actions={
+                  <span className="mka">
+                    <Button size="sm">Done</Button>
+                    <Button size="sm">No-show</Button>
+                  </span>
+                }
+              />
+            </Agenda>
+          </Cell>
+        </Bench>
+      </Blk>
       <Blk
         title="What it replaced"
         lede={

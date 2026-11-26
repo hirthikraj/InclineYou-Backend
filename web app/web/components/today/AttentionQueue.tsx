@@ -22,11 +22,11 @@ import { rupees } from '@/lib/today/time';
 function shortDay(at: number): string {
   return new Date(at).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
 }
-import { BellOff, Check, Ellipsis } from '@/components/shell/Icons';
+import { BellOff, Check, Chevron } from '@/components/shell/Icons';
+import { RowMenu, type RowMenuItem } from '@/web-components/ui/RowMenu';
 import { Button } from '@/web-components/ui/Button';
 import { Tag } from '@/web-components/ui/Tag';
 import { Avatar } from '@/web-components/ui/Avatar';
-import { InlineLink } from '@/web-components/ui/InlineLink';
 import { Slab } from '@/web-components/ui/Slab';
 import { useFlipRows } from '@/lib/ui/flip-rows';
 
@@ -91,7 +91,6 @@ import { useFlipRows } from '@/lib/ui/flip-rows';
 
 type RowState =
   | { kind: 'rest' }
-  | { kind: 'choosing' }
   /** Option B (V32): Renew asks whether the new pack takes the sessions delivered without one. */
   | { kind: 'offer'; sessions: { id: string; at: number }[]; take: number }
   | { kind: 'held'; secondsLeft: number }
@@ -413,7 +412,6 @@ export function AttentionQueue({
       onAct={() => act(item)}
       onRenewTaking={(ids) => void commit(item, ids)}
       onUndo={() => undo(item)}
-      onChoose={() => setState(item.key, { kind: 'choosing' })}
       onCancel={() => setState(item.key, { kind: 'rest' })}
       onSilence={(permanent) => void silence(item, permanent)}
       onUnsilence={(id) => void unsilence(item, id)}
@@ -426,7 +424,7 @@ export function AttentionQueue({
   );
 
   return (
-    <Slab title="Needs you today" count={groups.length}>
+    <Slab title="Needs you today" count={groups.length} flush>
       <span className="vh">
         {clientsNeedYou(groups.length)}
       </span>
@@ -675,7 +673,6 @@ function Row({
   onAct,
   onRenewTaking,
   onUndo,
-  onChoose,
   onCancel,
   onSilence,
   onUnsilence,
@@ -692,7 +689,6 @@ function Row({
   /** Renew, with the delivered sessions the new pack takes (none = renew only). */
   onRenewTaking: (sessionIds: string[]) => void;
   onUndo: () => void;
-  onChoose: () => void;
   onCancel: () => void;
   onSilence: (permanent: boolean) => void;
   onUnsilence: (dismissalId: string) => void;
@@ -823,28 +819,6 @@ function Row({
     );
   }
 
-  if (state.kind === 'choosing') {
-    return (
-      <tr className={rowClass} data-flip={item.key}>
-        {who}
-        <td className="q__why" colSpan={3}>
-          <div className="q__ask">
-            <span>Stop raising this?</span>
-            <Button size="sm" onClick={() => onSilence(false)}>
-              Snooze a week
-            </Button>
-            <Button size="sm" onClick={() => onSilence(true)}>
-              Dismiss
-            </Button>
-            <Button size="sm" variant="ghost" onClick={onCancel}>
-              Keep it
-            </Button>
-          </div>
-        </td>
-      </tr>
-    );
-  }
-
   if (state.kind === 'silenced') {
     return (
       <tr className={rowClass} data-flip={item.key}>
@@ -943,6 +917,37 @@ function Row({
     );
   }
 
+  /*
+   * THE ⋯ MENU — every answer on the row that is not its verb.
+   *
+   * Snooze and dismiss used to open an inline *Stop raising this?* confirm;
+   * in a menu the two items ARE that choice, so they act directly. Both are
+   * undoable on the row (`silenced` state), which is what made the confirm
+   * unnecessary. No snooze on an assessment (R31: the band constraint has no
+   * room for it), a setup row (the soft block) or a follow-up (V48) — those
+   * rows leave when the thing is done, never because they were waved off.
+   */
+  const snoozable = item.kind !== 'assess' && item.kind !== 'setup' && item.kind !== 'follow-up';
+  const extras: RowMenuItem[] = [
+    ...(item.single && singlePrice && onSingle
+      ? [{ key: 'single', label: `Make it single · ${rupees(singlePrice)}`, onSelect: () => onSingle(singlePrice) }]
+      : []),
+    ...(item.action === 'Renew'
+      ? [{ key: 'report', label: 'Send progress report', href: `/clients/${item.clientId}/report` }]
+      : []),
+  ];
+  const silencers: RowMenuItem[] = snoozable
+    ? [
+        { key: 'snooze', label: `Snooze a week`, onSelect: () => onSilence(false) },
+        { key: 'dismiss', label: 'Dismiss', onSelect: () => onSilence(true) },
+      ]
+    : [];
+  const menu: RowMenuItem[] = [
+    ...extras,
+    ...(extras.length > 0 && silencers.length > 0 ? [{ separator: true as const, key: 'sep' }] : []),
+    ...silencers,
+  ];
+
   return (
     <tr className={rowClass} data-flip={item.key}>
       {who}
@@ -953,35 +958,18 @@ function Row({
             thank it for: the sentence beside it already says the same thing in
             words, and a screen reader announcing "Money, ₹6,400 overdue" on every
             row is the category read out twice. */}
-        <span className="q__k" aria-hidden="true">{KIND_LEAD[item.kind]}</span>
+        <span className={`q__k q__k--${KIND_TONE[item.kind]}`} aria-hidden="true">{KIND_LEAD[item.kind]}</span>
         {item.line}
-        {/* THE MOMENT THE PROGRESS REPORT EXISTS FOR. Clients renew when they
-            can see progress, and a pack running out is when that is decided —
-            so the card is offered on the row that asks for the renewal. In the
-            text and not beside the verb: `.q__act` is sized for one button. */}
-        {/* The second answer to *Training with no pack*, beside Renew's: in the
-            text cell because `.q__act` holds one verb. A real button — it writes. */}
-        {item.single && singlePrice && onSingle && (
-          <>
-            <span className="q__dot" aria-hidden="true">{' · '}</span>
-            <button
-              type="button"
-              className="q__also-b"
-              disabled={state.kind === 'working'}
-              onClick={() => onSingle(singlePrice)}
-            >
-              Make it single · {rupees(singlePrice)}
-            </button>
-          </>
-        )}
-        {item.action === 'Renew' && (
-          <>
-            <span className="q__dot" aria-hidden="true">{' · '}</span>
-            <span className="q__rep">
-              <InlineLink href={`/clients/${item.clientId}/report`}>Send progress report</InlineLink>
-            </span>
-          </>
-        )}
+        {/*
+          THE ROW'S SECOND ANSWERS LIVE IN ITS ⋯ MENU NOW (revamp, 26 Nov 2026).
+
+          *Make it single · ₹750*, *Send progress report* and *+4 more* were
+          inline links in this cell, so the busiest row on the screen read as
+          *name · reason · link · link · link · counts* and the reason — the row —
+          was the shortest thing in it. The two that SELL or SEND are menu
+          items on this row now; the client's other jobs are a pill in the
+          line (below), because hiding a ₹3,000 debt behind ⋯ hides the debt.
+        */}
         {/*
           ALREADY MESSAGED, AND THE ROW SAYS SO RATHER THAN VANISHING.
 
@@ -1003,23 +991,23 @@ function Row({
           </span>
         )}
         {/*
-          THE CLIENT'S OTHER JOBS, NAMED, ONE CLICK FROM THEIR VERBS.
-          The kinds are in the label so the trainer can tell whether it is worth
-          opening ("+2 · 1 money · 1 attendance") without opening it.
+          THE CLIENT'S OTHER JOBS — a real control in the row, not a menu item.
+          The first revamp pass moved it into ⋯ and left a 10px count behind
+          that did nothing when pressed: the one way to see that Rohan also
+          owes ₹3,000 was hidden behind a glyph. A pill says how many and what
+          kinds, and opens them in place.
         */}
         {also && (
-          <span className="q__also">
-            <span className="q__dot" aria-hidden="true">{' · '}</span>
-            <button
-              type="button"
-              className="q__also-b"
-              aria-expanded={also.open}
-              onClick={also.onToggle}
-            >
-              {also.open ? 'Hide' : `+${also.count} more`}
-              <span className="q__also-k">{also.summary}</span>
-            </button>
-          </span>
+          <button
+            type="button"
+            className="q__grp"
+            aria-expanded={also.open}
+            onClick={also.onToggle}
+          >
+            {also.open ? 'Hide' : `+${also.count} more`}
+            {!also.open && <span className="q__grp-k">{also.summary}</span>}
+            <Chevron size={12} />
+          </button>
         )}
       </td>
       <td className="q__act">
@@ -1078,26 +1066,40 @@ function Row({
         the one control on the row whose consequence is that the row goes away.
       */}
       <td className="q__x">
-        {/* No snooze on an assessment row (R31): the attention_dismissal_band
-            constraint has no room for it, and "not now" would really mean
-            "change the date". The cell stays so the verbs down the list align. */}
-        {/* Nor on a setup row (22 Nov 2026): it is the soft block, and it goes
-            away when the step is done, never because it was waved off. */}
-        {/* Nor on a follow-up (V48): it leaves when a response is logged or the date moves. */}
-        {item.kind !== 'assess' && item.kind !== 'setup' && item.kind !== 'follow-up' && (
-          <button
-            className="q__x-b"
-            type="button"
-            onClick={onChoose}
-            aria-label={`Snooze or dismiss ${item.clientName}’s row`}
-          >
-            <Ellipsis size={16} />
-          </button>
+        {menu.length > 0 && (
+          <RowMenu
+            label={item.clientName}
+            items={menu}
+            width={236}
+            className="q__mn"
+          />
         )}
       </td>
     </tr>
   );
 }
+
+/**
+ * THE KIND AS A SOFT PILL (revamp review, 26 Nov 2026) — the word a trainer
+ * scans the queue by was its weakest text, 11px grey. Four tones, never red:
+ * the critical edge is the queue's one alarm, and a pill that shouts on every
+ * money row would be a second one. Money is amber because it is earned and
+ * owed; renewal is lime because it is the next sale; the people kinds share a
+ * blue; everything that is the trainer's own housekeeping stays neutral.
+ */
+const KIND_TONE: Record<AttentionItem['kind'], 'warn' | 'acc' | 'info' | 'neutral'> = {
+  overdue: 'warn',
+  pack: 'acc',
+  quiet: 'info',
+  missed: 'info',
+  'follow-up': 'info',
+  milestone: 'acc',
+  'no-program': 'neutral',
+  setup: 'neutral',
+  assess: 'neutral',
+  unmarked: 'neutral',
+  log: 'neutral',
+};
 
 /**
  * What each instant verb's receipt says.

@@ -4,10 +4,29 @@ import type { ReactNode } from 'react';
 export type HeroCardBand = {
   icon: ReactNode;
   tone?: 'acc' | 'warn';
+  /** A bold first line (*5 h 45 m unbooked today*). Without it the band is one
+      sentence that bolds its own lead, which is how every pre-revamp caller
+      writes it. */
+  title?: ReactNode;
   text: ReactNode;
+  /** One link ranged right of the band (*Open slots*). */
+  action?: ReactNode;
 };
 
 /**
+ * ── THE REVAMP (26 Nov 2026): THREE OPTIONAL PIECES, NOTHING REMOVED ──────────
+ *
+ * Taken from the reference the Today revamp was drawn from, each optional so
+ * the portal's callers are untouched:
+ *
+ *   · `kickerAction` — a link ranged right of the kicker (*6 sessions →*). The
+ *     door to the rest of what the kicker names, where a trainer looks for it,
+ *     instead of a *See tomorrow* button in the action row.
+ *   · `inline` — the figure and the name side by side (*6:00 AM | Meera Iyer*).
+ *     A time and a person are one fact, and stacking them spent 40px a card.
+ *   · `foot` — a ruled foot: a status on the left (*✓ No clashes tomorrow*),
+ *     the actions on the right. Without it `actions` draw as before.
+ *
  * THE HERO CARD, REDRAWN. Prop-for-prop the same API as `ui/HeroCard`, so the
  * five call-sites in `components/today/Hero.tsx` swap one import and change
  * nothing else — which is also what makes it cheap to prove that no content
@@ -62,8 +81,14 @@ export function HeroCard({
   actions,
   label,
   quiet = false,
+  kickerAction,
+  inline = false,
+  foot,
 }: {
   kicker: ReactNode;
+  kickerAction?: ReactNode;
+  inline?: boolean;
+  foot?: ReactNode;
   live?: boolean;
   /** Accepted, and deliberately not read. `HeroCard` used it to add
       `card--lead`; the hero pair is ranked by FILL now, so there is nothing
@@ -84,43 +109,77 @@ export function HeroCard({
   quiet?: boolean;
 }) {
   const quietly = quiet || !live;
+  const cls = ['hro', quietly ? 'hro--quiet' : null, inline ? 'hro--inline' : null]
+    .filter(Boolean)
+    .join(' ');
+
+  const nameNode = name && (
+    <p className="hro__n">
+      {nameHref ? (
+        <Link href={nameHref} style={{ color: 'inherit' }}>
+          {name}
+        </Link>
+      ) : (
+        name
+      )}
+    </p>
+  );
+
+  const figureNode = figure !== undefined && (
+    <p className="hro__c" aria-hidden="true">
+      {figure}
+      {unit && <em className="hro__u">{unit}</em>}
+    </p>
+  );
+
   return (
-    <div className={`hro${quietly ? ' hro--quiet' : ''}`} role="group" aria-label={label}>
-      <h3 className="hro__k">
-        {live && <i />}
-        {kicker}
-      </h3>
+    <div className={cls} role="group" aria-label={label}>
+      <div className="hro__top">
+        <h3 className="hro__k">
+          {live && <i />}
+          {kicker}
+        </h3>
+        {kickerAction && <span className="hro__ka">{kickerAction}</span>}
+      </div>
 
-      {figure !== undefined && (
-        <p className="hro__c" aria-hidden="true">
-          {figure}
-          {unit && <em className="hro__u">{unit}</em>}
-        </p>
+      {inline ? (
+        <div className="hro__row">
+          {figureNode}
+          <div className="hro__who">
+            {nameNode}
+            {detail && <p className="hro__d">{detail}</p>}
+          </div>
+        </div>
+      ) : (
+        <>
+          {figureNode}
+          {nameNode}
+          {detail && <p className="hro__d">{detail}</p>}
+        </>
       )}
-
-      {name && (
-        <p className="hro__n">
-          {nameHref ? (
-            <Link href={nameHref} style={{ color: 'inherit' }}>
-              {name}
-            </Link>
-          ) : (
-            name
-          )}
-        </p>
-      )}
-
-      {detail && <p className="hro__d">{detail}</p>}
       {chips && <div className="hro__c2">{chips}</div>}
 
       {band && (
-        <div className={`hro__w${band.tone ? ` hro__w--${band.tone}` : ''}`}>
-          {band.icon}
-          <span>{band.text}</span>
+        <div
+          className={`hro__w${band.tone ? ` hro__w--${band.tone}` : ''}${band.title ? ' hro__w--titled' : ''}`}
+        >
+          <span className="hro__wi">{band.icon}</span>
+          <span className="hro__wt">
+            {band.title && <b className="hro__wh">{band.title}</b>}
+            <span>{band.text}</span>
+          </span>
+          {band.action && <span className="hro__wa">{band.action}</span>}
         </div>
       )}
 
-      {actions && <div className="hro__a">{actions}</div>}
+      {foot !== undefined ? (
+        <div className="hro__f">
+          <span className="hro__fs">{foot}</span>
+          {actions && <div className="hro__a">{actions}</div>}
+        </div>
+      ) : (
+        actions && <div className="hro__a">{actions}</div>
+      )}
     </div>
   );
 }

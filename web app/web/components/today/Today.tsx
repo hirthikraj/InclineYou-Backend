@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import type { TodayData } from '@/lib/today/api';
 import { dayMoney, findClash, findGaps, windowsFor } from '@/lib/today/day';
 import { sessions } from '@/lib/today/copy';
-import { dayLong, minuteOfDay, startOfDay } from '@/lib/today/time';
+import { dayLong, dayStamp, minuteOfDay, startOfDay } from '@/lib/today/time';
 import { defaultSlot } from '@/lib/schedule/book';
 import { SNAP_MINUTES } from '@/lib/schedule/result';
 import { BookPanel } from '@/components/schedule/BookPanel';
@@ -19,6 +19,8 @@ import { FirstRun } from './FirstRun';
 import { Hero } from './Hero';
 import { OwedAssessmentsProvider } from './OwedAssessments';
 import { usePaletteRows } from '@/components/shell/PaletteHost';
+import { usePublishTodayBadge } from '@/components/shell/railCount';
+import { groupAttention } from '@/lib/today/deck';
 import { Glance, PhoneStack, TodayList } from './PhoneStack';
 import { LastContactProvider } from '@/components/nudge/LastContact';
 import { Button } from '@/web-components/ui/Button';
@@ -145,6 +147,13 @@ export function Today({ data }: { data: TodayData }) {
      list of names. See `PaletteHost`. */
   usePaletteRows({ clients: deck.roster, attention: deck.attention, today: deck.today });
 
+  /* The sidebar's Today badge: the same count *Needs you today* prints beside
+     its title — clients, not rows, and without the diary rows the Close out
+     card owns. One number in two places, from one function. */
+  usePublishTodayBadge(
+    deck.firstRun ? 0 : groupAttention(deck.attention.filter((i) => i.kind !== 'unmarked')).length,
+  );
+
   // The day's shape. Derived from the SERVER's instant for the parts that must
   // not move — the day's extent and its gaps are facts about the day, not about
   // this second — and from the ticking `now` only where a minute matters.
@@ -176,21 +185,73 @@ export function Today({ data }: { data: TodayData }) {
       : deck.upNext.slice(0, 2).map((s) => s.id)
   ).filter(Boolean) as string[];
 
+  /*
+   * THE LINE UNDER THE DATE, AND IT LOOKS AHEAD (revamp, 26 Nov 2026).
+   *
+   * The reference's *4 sessions today · none logged yet · 6 tomorrow* says three
+   * things where ours said two: how big today is, whether it is settled, and how
+   * big tomorrow is — the last being the number a trainer otherwise opens the
+   * Schedule to find at 9 PM. *Logged* is the word because the card below is
+   * *Log today's sessions*; one verb, two places.
+   */
+  const total = deck.today.length;
+  const logged =
+    deck.todayDone === 0
+      ? 'none logged yet'
+      : deck.todayDone === total
+        ? 'all logged'
+        : `${deck.todayDone} of ${total} logged`;
+  const ahead = deck.tomorrowCount > 0 ? ` · ${deck.tomorrowCount} tomorrow` : '';
   const subtitle = deck.firstRun
     ? 'No clients yet · nothing to show until there is one'
     : deck.running
-      ? `In session with ${deck.running.clientName} · ${sessions(deck.today.length)}, ${deck.todayDone} done`
-      : deck.today.length === 0
-        ? 'Nothing booked today'
-        : deck.todayDone === deck.today.length
-          ? `Day done · ${deck.todayDone} of ${deck.today.length} delivered`
-          /* The date is the h1 directly above; the line says only what it adds. */
-          : `${sessions(deck.today.length)} · ${deck.todayDone} done`;
+      ? `In session with ${deck.running.clientName} · ${sessions(total)} today, ${deck.todayDone} logged`
+      : total === 0
+        ? `Nothing booked today${ahead}`
+        : `${sessions(total)} today · ${logged}${ahead}`;
+
+  /* Nothing left to start: the hero rolls to tomorrow and the day's list
+     becomes the card that logs it — first, because it is the evening's job. */
+  const dayOver = !deck.running && deck.upNext.length === 0 && total > 0;
+
+  const heroNode = (
+    <Hero
+      deck={deck}
+      now={now}
+      money={money}
+      gaps={gaps}
+      windows={windows}
+      gymSharePercent={trainer.gymSharePercent}
+      gymName={trainer.gymName}
+      clash={clash}
+      hasAnyHours={hours.length > 0}
+      onBook={openBookingAt}
+    />
+  );
+
+  const queueNode = (
+    <AttentionQueue
+        /* `unmarked` rows are the Close out card's now, one line per
+           session rather than one *Mark all done* per client. */
+        items={deck.attention.filter((i) => i.kind !== 'unmarked')}
+        silenced={deck.silenced}
+        renewTerms={renewTerms}
+        openLogs={openLogs}
+        singleRates={rates.perSession}
+        todayCount={deck.today.length}
+        now={now}
+      />
+  );
 
   return (
     <LastContactProvider map={data.lastContact} now={data.now}>
       <OwedAssessmentsProvider value={assessments}>
-      <TopBar crumb="Today" />
+      <TopBar
+        crumb="Today"
+        /* The date and the day's state, on a phone — `.ph--today` hides the
+           page header there, so nothing else on the phone says either. */
+        subtitle={deck.firstRun ? undefined : `${dayStamp(serverNow).replace(' · ', ' ')} · ${total === 0 ? 'nothing booked' : logged}`}
+      />
 
       <main className="main" id="main-content">
         {/*
@@ -237,7 +298,7 @@ export function Today({ data }: { data: TodayData }) {
               <div className="ph__acts ph__acts--pair">
                 <Button href="/schedule" variant="secondary">
                   <Calendar size={15} />
-                  The week
+                  Week view
                 </Button>
                 {/* A button, not a link — see the note in the body. The panel
                     opens over this screen instead of over a week grid two
@@ -251,76 +312,55 @@ export function Today({ data }: { data: TodayData }) {
           </div>
         </div>
 
-        <div className="body">
+        {/* `tdy` scopes the revamp's look (§R in app.css) to this screen while
+            the other screens wait their turn. */}
+        <div className="body tdy">
           {deck.firstRun ? (
             <FirstRun />
           ) : (
-            <>
-              {/* BLOCK 1 — what is happening, and what is next. Two cards, the
-                  first washed and the second plain; `.today__hero` drops the
-                  second below 1080px. */}
-              <Hero
-                deck={deck}
-                now={now}
-                money={money}
-                gaps={gaps}
-                windows={windows}
-                gymSharePercent={trainer.gymSharePercent}
-                gymName={trainer.gymName}
-                clash={clash}
-                hasAnyHours={hours.length > 0}
-                onBook={openBookingAt}
-              />
+            /*
+              TWO COLUMNS ON A WIDE SCREEN, ONE EVERYWHERE ELSE (26 Nov 2026).
 
-              {/* …and below it, the rest of the day as compact rows. One
-                  component at every width, where the ribbon and the phone's own
-                  list used to be two. */}
-              <TodayList deck={deck} heroIds={heroIds} />
+              A 1200px column left-aligned in a 1790px window left 560px empty
+              and parked *New session* in the middle of the screen; full width
+              would run a row 1,500px from a client's name to its *Done*. So at
+              a wide CONTENT width (a container query — the rail collapses, trap
+              4) the lists keep a readable left column and the cards — the hero
+              pair, then the three figures — stack in a 380px side column.
 
-              {/*
-                BLOCK 2 — the ranked queue, full width.
-
-                It used to be the first of three columns at `1.5fr 1fr 1fr`, with
-                the week and the month beside it. Both are unmounted now, so the
-                ratio has nothing to divide and the queue takes the row.
-
-                That is a straight improvement rather than a consequence: the
-                comment this replaces argued that the reason column "must never be
-                truncated — '₹6,000 overdue · 11 days' IS the row", and then gave
-                the queue 1.5 of 3.5 tracks, which is 480px at 1440 against a table
-                measured at ~552px. `AGENTS.md` recorded that overflow as open, with
-                the fix being a container query. The full width closes it by
-                arithmetic instead: the card is ~1,140px at 1440 with the rail up,
-                and the four columns have room to spare at every width above the
-                620px reflow.
-              */}
-              {/* Past sessions nobody marked — above the queue, because every
-                  pack figure in the queue below is wrong until they are answered.
-                  See `CloseOut`. */}
-              <CloseOut sessions={deck.closeOut} />
-
-              <AttentionQueue
-                  /* `unmarked` rows are the Close out card's now, one line per
-                     session rather than one *Mark all done* per client. */
-                  items={deck.attention.filter((i) => i.kind !== 'unmarked')}
-                  silenced={deck.silenced}
-                  renewTerms={renewTerms}
-                  openLogs={openLogs}
-                  singleRates={rates.perSession}
-                  todayCount={deck.today.length}
-                  now={now}
-                />
-
-              {/* BLOCK 3 — three numbers, no more. At the FOOT, after the work:
-                  they are what a trainer checks once the list is clear, not the
-                  thing that greets them. */}
-              <Glance deck={deck} />
-
-              {/* What happened — the one module that is still phone-only, and the
-                  reason is in `PhoneStack`: a desk has `/reports` in the rail. */}
-              <PhoneStack deck={deck} />
-
-            </>
+              Below it both columns are `display:contents` and every block takes
+              its place in ONE column by `order` (the `tdy__o--N` classes), so the
+              reading order is the time-aware one at every width:
+                · day running: next up → the rest of today → needs you → last week
+                · day over:    log today → tomorrow + earnings → last week → needs you
+              then the figures, then the phone-only recent activity. One markup,
+              no branch on a measured width (the shell's rule).
+            */
+            <div className="tdy__grid">
+              <div className="tdy__main">
+                <div className={`tdy__o tdy__o--${dayOver ? 1 : 2}`}>
+                  <TodayList deck={deck} heroIds={heroIds} now={now} dayOver={dayOver} />
+                </div>
+                {/* Needs you before last week's housekeeping while the day runs;
+                    the other way round once it is over (product owner). */}
+                <div className={`tdy__o tdy__o--${dayOver ? 4 : 3}`}>{queueNode}</div>
+                <div className={`tdy__o tdy__o--${dayOver ? 3 : 4}`}>
+                  <CloseOut sessions={deck.closeOut} />
+                </div>
+                {/* What happened — phone-only; a desk has `/reports` in the rail. */}
+                <div className="tdy__o tdy__o--6">
+                  <PhoneStack deck={deck} />
+                </div>
+              </div>
+              <aside className="tdy__side" aria-label="The day in short">
+                <div className={`tdy__o tdy__o--${dayOver ? 2 : 1}`}>{heroNode}</div>
+                {/* Three numbers, no more — what a trainer checks once the list
+                    is clear. */}
+                <div className="tdy__o tdy__o--5">
+                  <Glance deck={deck} />
+                </div>
+              </aside>
+            </div>
           )}
         </div>
       </main>

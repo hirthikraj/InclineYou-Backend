@@ -4,7 +4,7 @@ import type { DeckSession } from '@/lib/today/deck';
 import { Check, Panel } from './Icons';
 import { Logo } from '@/web-components/ui/Logo';
 import {
-  PRIMARY, type Destination, type RailBadge, type RailCounts, type RailKey,
+  PRIMARY, type Destination, type RailBadge, type RailCounts, type RailKey, type SectionPage,
 } from './nav';
 import { AccountMenu } from './AccountMenu';
 import { Avatar } from '@/web-components/ui/Avatar';
@@ -92,18 +92,27 @@ function Item({
   badge,
   onPreview,
   onLeave,
+  nested = false,
 }: {
   dest: Destination;
   current: RailKey;
   badge?: RailBadge;
+  /** This row's pages are drawn under it in the sidebar already, so resting on
+   *  it opens nothing — a card repeating the list beside the list is one list
+   *  twice. */
+  nested?: boolean;
   /** Rest here and this section's pages open beside the rail — `panePreview.ts`
    *  has the timing and the argument for it. Called with this row's key, or with
    *  `null` from a row that has no pages, which is a request to close. */
-  onPreview?: (key: RailKey | null) => void;
+  onPreview?: (key: RailKey | null, anchorTop?: number) => void;
   /** Left this row. The pane's own `hold` is what stops a pointer on its way
    *  INTO the pane from being read as a pointer leaving the rail. */
   onLeave?: () => void;
 }) {
+  /* The row's top edge travels with the key, so the hover card opens BESIDE the
+     row that asked (26 Nov 2026) rather than as a full-height slab over the page. */
+  const ask = (el: HTMLElement) =>
+    onPreview?.(dest.pages?.length && !nested ? dest.key : null, el.getBoundingClientRect().top);
   return (
     <Link
       className="rail__i"
@@ -117,14 +126,29 @@ function Item({
          `onFocus` beside `onMouseEnter`, and for the reason the tooltips are
          specified rather than left to `title=`: at 64px this is the one way to
          the section's pages, and a keyboard user arrives here with no pointer. */
-      onMouseEnter={onPreview ? () => onPreview(dest.pages?.length ? dest.key : null) : undefined}
-      onFocus={onPreview ? () => onPreview(dest.pages?.length ? dest.key : null) : undefined}
+      onMouseEnter={onPreview ? (e) => ask(e.currentTarget) : undefined}
+      onFocus={onPreview ? (e) => ask(e.currentTarget) : undefined}
       onMouseLeave={onLeave}
       onBlur={onLeave}
+      /* → walks into the open hover card (26 Nov 2026). The card is drawn after
+         the sidebar in the DOM, so Tab from this row reaches the next ROW, not
+         the card; the arrow is the keyboard's sideways step, the same gesture
+         the pointer makes. */
+      onKeyDown={(e) => {
+        if (e.key !== 'ArrowRight') return;
+        const first = document.querySelector<HTMLElement>('.pane--float.pane--open .pane__i');
+        if (first) {
+          e.preventDefault();
+          first.focus();
+        }
+      }}
       /* The purpose line, as a tooltip rather than a second line of text. Five
          rows with a subtitle each is a menu; five rows with a hover is a rail. */
       title={dest.purpose}
-      {...(dest.key === current ? { 'aria-current': 'page' as const } : {})}
+      /* `true`, not `page`, when the section's pages are nested under it: the
+         PAGE link below is the current page, and two `page`s in one nav tell a
+         screen reader the trainer is in two places. */
+      {...(dest.key === current ? { 'aria-current': nested ? ('true' as const) : ('page' as const) } : {})}
     >
       {dest.icon}
       <span>{dest.label}</span>
@@ -202,6 +226,7 @@ export function Rail({
   pane,
   onPreview,
   onPreviewLeave,
+  sub,
 }: {
   current: RailKey;
   trainerName: string;
@@ -260,8 +285,18 @@ export function Rail({
    * Absent in a bench and in the portal, where no rail row has pages and the
    * handlers would be wired to nothing.
    */
-  onPreview?: (key: RailKey | null) => void;
+  onPreview?: (key: RailKey | null, anchorTop?: number) => void;
   onPreviewLeave?: () => void;
+  /**
+   * THE CURRENT SECTION'S PAGES, NESTED UNDER ITS ROW (26 Nov 2026).
+   *
+   * The labelled sidebar replaced the rail + section pane: one column, and the
+   * section a trainer is in shows its pages in place, indented on a guide line,
+   * so *where am I inside Business* is answered without a second column. Absent
+   * while the sidebar is collapsed — the hover card answers it then — and in
+   * the portal, whose rows have no pages.
+   */
+  sub?: { pages: SectionPage[]; active?: string };
 }) {
   // Every count here is the trainer's own data, and a trainer with no clients has
   // none of it. Drawing zeroes would be a row of lies about how the product works.
@@ -282,7 +317,11 @@ export function Rail({
             be the same 28px square, because the brand row cannot hold both.
             `variant="mark"` drops the wordmark in the MARKUP: one that is
             present and invisible is still read aloud. */}
-        <Logo cap={17} variant="mark" className="rail__lk" />
+        {/* The full lockup since the sidebar is labelled (26 Nov 2026) — the
+          reference's *logo + app name* top left. §05 already hides the wordmark
+          in the 64px state (`.app--rail-min .lk__w`), and `display:none` takes
+          it out of the accessibility tree as well, so nothing is read twice. */}
+      <Logo cap={17} className="rail__lk" />
       </div>
 
       {/* BELOW THE MARK, AND IN ITS OWN ROW RATHER THAN IN THE BRAND ROW.
@@ -295,13 +334,14 @@ export function Rail({
           <button
             className="rail__pc"
             type="button"
-            aria-label={pane.collapsed ? `Show ${pane.label} pages` : `Hide ${pane.label} pages`}
+            aria-label={pane.collapsed ? `Expand the ${pane.label}` : `Collapse the ${pane.label}`}
             aria-expanded={!pane.collapsed}
             onClick={pane.onToggle}
           >
             <Panel size={17} />
+            <span className="rail__pcl" aria-hidden="true">Collapse</span>
             <span className="rail__tip" role="tooltip">
-              {pane.collapsed ? `Show ${pane.label} pages` : `Hide ${pane.label} pages`}
+              {pane.collapsed ? `Expand the ${pane.label}` : `Collapse the ${pane.label}`}
             </span>
           </button>
         </div>
@@ -317,16 +357,35 @@ export function Rail({
 
       <div className="rail__body">
         <div className="rail__group">
-          {destinations.map((d) => (
-            <Item
-              key={d.key}
-              dest={d}
-              current={current}
-              badge={shown[d.key as keyof RailCounts]}
-              onPreview={onPreview}
-              onLeave={onPreviewLeave}
-            />
-          ))}
+          {destinations.map((d) => {
+            const nested = Boolean(sub) && d.key === current;
+            return (
+              <div className="rail__sec" key={d.key}>
+                <Item
+                  dest={d}
+                  current={current}
+                  badge={shown[d.key as keyof RailCounts]}
+                  onPreview={onPreview}
+                  onLeave={onPreviewLeave}
+                  nested={nested}
+                />
+                {nested && sub && (
+                  <div className="rail__sub" role="group" aria-label={`${d.label} pages`}>
+                    {sub.pages.map((page) => (
+                      <Link
+                        key={page.key}
+                        className="rail__si"
+                        href={page.href}
+                        {...(page.key === sub.active ? { 'aria-current': 'page' as const } : {})}
+                      >
+                        {page.label}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {!firstRun && pins.length > 0 && (

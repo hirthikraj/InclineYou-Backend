@@ -74,6 +74,51 @@ export function HeroCardEntry() {
       ]}
     >
       <Blk
+        title="Inline, a kicker link, a titled band and a foot (26 Nov 2026)"
+        lede={
+          <>
+            Three optional pieces from the Today revamp: <code>inline</code> sets the figure beside the
+            name, <code>kickerAction</code> is the door to the rest of what the kicker names, and{' '}
+            <code>foot</code> is a ruled status-and-actions row. A band with a <code>title</code> and an{' '}
+            <code>action</code> is the quiet row Today draws for unbooked hours.
+          </>
+        }
+      >
+        <Bench style={{ alignItems: 'stretch' }}>
+          <Cell label="Tomorrow" stretch>
+            <HeroCard
+              quiet
+              inline
+              kicker="Tomorrow · Fri 27 Nov"
+              kickerAction={<a className="hro__kl" href="#">6 sessions</a>}
+              figure="6:00 AM"
+              name="Meera Iyer"
+              detail="Full body · Week 6/10"
+              chips={<Tag><Pin size={12} />In Person · Iron Temple</Tag>}
+              foot={<>No clashes tomorrow</>}
+              actions={<Button>Remind Meera</Button>}
+              label="Tomorrow specimen"
+            />
+          </Cell>
+          <Cell label="Today’s earnings" stretch>
+            <HeroCard
+              quiet
+              kicker="Today’s earnings"
+              figure="₹2,000"
+              unit="yours"
+              detail="of ₹2,000 billed"
+              band={{
+                icon: <Clock size={16} />,
+                title: '5 h 45 m unbooked today',
+                text: 'Two open gaps, the longest 5:45–10:00 PM.',
+                action: <a className="hro__kl hro__kl--u" href="#">Open slots</a>,
+              }}
+              label="Earnings specimen"
+            />
+          </Cell>
+        </Bench>
+      </Blk>
+      <Blk
         title="Specimen · in session"
         lede={
           <>

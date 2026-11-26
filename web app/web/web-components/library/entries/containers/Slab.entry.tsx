@@ -1,6 +1,7 @@
 import { Blk, Bench, Cell } from '../../chrome/Blk';
 import { SpecTable, DoDont } from '../../chrome/Docs';
 import { Slab } from '../../../ui/Slab';
+import { Button } from '../../../ui/Button';
 
 /**
  * A SECTION, GROUPED BY A RULE INSTEAD OF A BOX.
@@ -11,6 +12,32 @@ import { Slab } from '../../../ui/Slab';
 export function SlabEntry() {
   return (
     <>
+      <Blk
+        title="A sentence and a verb in the head (26 Nov 2026)"
+        lede={
+          <>
+            From the Today revamp: <code>lead</code> says why the section matters, <code>button</code>{' '}
+            is its own verb ranged right, <code>countLabel</code> + <code>countTone=&quot;warn&quot;</code>{' '}
+            is the one count that IS the urgency, and <code>flush</code> runs the body to the card&rsquo;s
+            edges. `/today` draws it as a white card (§R, scoped); this bench is the base.
+          </>
+        }
+      >
+        <Bench style={{ alignItems: 'stretch' }}>
+          <Cell label="lead · warn count · ink verb" stretch>
+            <Slab
+              title="Log today’s sessions"
+              count={4}
+              countLabel="to log"
+              countTone="warn"
+              lead="Pack balances only change once a session is marked done or no-show."
+              button={<Button variant="ink">Mark all 4 done</Button>}
+            >
+              <p className="small" style={{ paddingTop: 2 }}>The rows go here.</p>
+            </Slab>
+          </Cell>
+        </Bench>
+      </Blk>
       <Blk
         title="What it replaced"
         lede={

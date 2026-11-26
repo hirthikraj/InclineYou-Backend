@@ -20,6 +20,11 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react';
  * having a pane of its own, and one browser may hold both halves.
  */
 export const PANE_KEY = 'inclineyou_web_pane_collapsed';
+/* The labelled sidebar's own answer (26 Nov 2026). A NEW key, not PANE_KEY:
+   "collapsed" used to hide a 212px page list beside a fixed icon rail and now
+   narrows the whole sidebar to that rail — a different thing to have chosen,
+   so nobody's old choice silently strips the labels off the new sidebar. */
+export const SIDEBAR_KEY = 'inclineyou_web_sidebar_collapsed';
 export const PORTAL_PANE_KEY = 'inclineyou_web_portal_pane_collapsed';
 
 /* Per KEY, not one variable: a single `cached` would hand the portal's answer to

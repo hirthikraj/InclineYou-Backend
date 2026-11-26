@@ -40,6 +40,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export const OPEN_DELAY = 120;
 export const SWAP_DELAY = 0;
 export const CLOSE_GRACE = 200;
+/**
+ * AIMING (26 Nov 2026). With a labelled sidebar the card opens BESIDE its row,
+ * so the way from *Fitness* to *Workouts* runs diagonally across the *Business*
+ * row below it — and every row it crosses used to win, closing or swapping the
+ * card under the pointer. While the pointer is heading INTO the open card (the
+ * caller decides that with a triangle test), a row's request waits this long;
+ * reaching the card cancels it (`hold`), stopping short of it lets it through.
+ * The menu-aim pattern, as large menus have done it for a decade.
+ */
+export const AIM_DELAY = 320;
 
 export type PanePreview<K extends string> = {
   /** The section being previewed, or `null`. The live answer. */
@@ -57,8 +67,10 @@ export type PanePreview<K extends string> = {
    */
   shown: K | null;
   /** The pointer (or the focus ring) arrived on a row. `null` means a row with
-   *  no pages, which is a request to CLOSE — with the grace, not instantly. */
-  enter: (next: K | null) => void;
+   *  no pages, which is a request to CLOSE — with the grace, not instantly.
+   *  `aiming` says the pointer is crossing this row on its way into the open
+   *  card, so the request waits `AIM_DELAY` instead. */
+  enter: (next: K | null, aiming?: boolean) => void;
   /** Under the pointer after all — cancel whatever close is pending. */
   hold: () => void;
   /** Left. Closes after the grace. */
@@ -98,7 +110,11 @@ export function usePanePreview<K extends string>(): PanePreview<K> {
   );
 
   const enter = useCallback(
-    (next: K | null) => {
+    (next: K | null, aiming = false) => {
+      if (aiming && key) {
+        commit(next, AIM_DELAY);
+        return;
+      }
       if (next === null) {
         commit(null, CLOSE_GRACE);
         return;

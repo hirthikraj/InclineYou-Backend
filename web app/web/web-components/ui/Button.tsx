@@ -35,7 +35,13 @@ import type { ComponentPropsWithRef, ReactNode } from 'react';
  */
 
 /** Emphasis. A hierarchy, not a palette — two primaries in a row and neither is. */
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+/**
+ * `ink` (26 Nov 2026, the Today revamp): a filled ink plate for a section's own
+ * bulk verb (*Mark all 4 done*). Not lime — lime stays the ONE next action on a
+ * screen — and not secondary, because a verb that settles a whole card should
+ * outrank the per-row *Done* buttons under it.
+ */
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'ink';
 
 /** 40px, 34px, 28px. `sm` belongs in a table row or a card header, never alone in a toolbar. */
 export type ButtonSize = 'lg' | 'md' | 'sm';
